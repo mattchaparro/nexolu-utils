@@ -36,13 +36,15 @@ gradual, feature por feature.
 
 ## Mapa de repos
 
+Cada repo tiene mas descripción en su propio readme.
+
 | Repo | Qué es | Stack | Estado |
 |---|---|---|---|
 | [`nexolu-pos-api`](https://github.com/mattchaparro/nexolu-pos-api) | Backend nuevo, API-first | Laravel 13, PHP 8.4, MySQL, Redis | En migración activa - ver `docs/MIGRATION_BACKLOG.md` ahí |
 | [`nexolu-pos-front`](https://github.com/mattchaparro/nexolu-pos-front) | Frontend nuevo, SPA | Vue 3, Vite, Pinia, TanStack Query, Tailwind v4, PrimeVue | En migración activa - ver `docs/BACKEND_READINESS.md` ahí |
 | [`nexolu-ia-core`](https://github.com/mattchaparro/nexolu-ia-core) | Asistente de IA, compartido por todos los productos Nexolú (no solo POS) | Python, FastAPI, SQLAlchemy async, Alembic | Servicio nuevo, ya integrado con el POS |
 | [`nexolu-comms-api`](https://github.com/mattchaparro/nexolu-comms-api) | Envío de WhatsApp/email, compartido por todos los productos | Python, FastAPI, SQLAlchemy async, Alembic | Servicio nuevo, interfaces del lado del POS ya listas, corte real pendiente |
-| [nexolu-payments-core](https://github.com/mattchaparro/nexolu-payments-core)  Cobros de suscripción (Wompi), compartido por todos los productos | (no clonado localmente todavía) | Ya integrado con el POS (checkout de suscripción) |
+| [nexolu-payments-core](https://github.com/mattchaparro/nexolu-payments-core) | Cobros de suscripción (Wompi), compartido por todos los productos | (no clonado localmente todavía) | Ya integrado con el POS (checkout de suscripción) |
 | `pos-saas` (GitLab: `gitlab.com:mattchaparrof/pos-saas`) | **El monolito legacy, todavía en producción** (`pos.nexolu.co`) | Laravel 10 + Inertia + Vue 3 | Fuente de verdad de lo que hay que migrar - se va reduciendo módulo por módulo |
 | `pos-saas-legacy` (GitHub, snapshot local) | Copia de referencia del monolito (un solo commit, para no depender de acceso a GitLab) | igual que `pos-saas` | Solo lectura, para consultar código/`CONTEXT.md`/`ARCHITECTURE.md` |
 | `nexolu-utils` (este repo) | Documentación de arquitectura + herramientas de desarrollo local | - | - |
