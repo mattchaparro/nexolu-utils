@@ -1,22 +1,30 @@
 #!/usr/bin/env bash
 #
 # Levanta todo el stack local de Nexolu POS:
-#   - nexolu-pos-api   (Laravel Sail: mysql + redis + api en :8000)
-#   - nexolu-ia-core   (uvicorn, :8001)
-#   - nexolu-comms-api (uvicorn, :8002)
-#   - nexolu-pos-front (Vite en contenedor node:20, :5173)
-#   - 2 tuneles cloudflared (API + frontend), para abrir el frontend desde
-#     el celular apuntando la SPA al tunel de la API (no a localhost, que
-#     desde el celular no significa nada).
+#   - nexolu-pos-api      (Laravel Sail: mysql + redis + api en :8000)
+#   - nexolu-ia-core      (uvicorn, :8001)
+#   - nexolu-comms-api    (uvicorn, :8002)
+#   - nexolu-payments-core (uvicorn, :8003) - pasarela de pagos unificada
+#     (Wompi hoy). nexolu-pos-api la alcanza via host.docker.internal, no
+#     localhost, porque corre en un contenedor Sail - ver PAYMENTS_CORE_BASE_URL
+#     en su .env. La primera vez que corre este script, si nexolu-pos-api/.env
+#     todavia no tiene PAYMENTS_CORE_API_KEY, tambien da de alta el Merchant +
+#     Integration + credencial Wompi sandbox (ver seccion 4 mas abajo).
+#   - nexolu-pos-front    (Vite en contenedor node:20, :5173)
+#   - 3 tuneles cloudflared (API + frontend + Payments Core), para abrir el
+#     frontend desde el celular apuntando la SPA al tunel de la API (no a
+#     localhost, que desde el celular no significa nada), y para poder
+#     pegar el tunel de Payments Core como webhook URL en el dashboard
+#     sandbox de Wompi (Wompi corre afuera, no le puede pegar a localhost).
 #
 # Uso:
-#   bash start_local_pos.sh              Pull + rebuild de los 4 repos, y
+#   bash start_local_pos.sh              Pull + rebuild de los 5 repos, y
 #                                        tuneles relanzados y verificados.
 #   bash start_local_pos.sh --no-tunnel  Lo mismo (pull + rebuild) pero sin
 #                                        tocar los tuneles cloudflared ya
 #                                        corriendo - misma URL de siempre.
 #
-# SIEMPRE, con o sin flag, en cada uno de los 4 repos: `git pull origin
+# SIEMPRE, con o sin flag, en cada uno de los 5 repos: `git pull origin
 # main` (con stash/pop automatico si hay cambios locales sin commitear, para
 # no perderlos) + rebuild real:
 #   - nexolu-pos-api: docker compose up -d --build
@@ -33,10 +41,13 @@
 # que nunca se reutiliza uno sin verificarlo. Con --no-tunnel esa seccion se
 # salta por completo: las URLs publicas quedan exactamente como estaban.
 #
-# Asume que los 4 repos ya estan clonados como hermanos en este mismo
+# Asume que los 5 repos ya estan clonados como hermanos en este mismo
 # directorio, en main, y ya pasaron por el setup inicial (composer install,
-# .env con WWWUSER/WWWGROUP/APP_PORT, schema.sql cargado, venvs de los dos
-# servicios Python). Este script NO hace ese setup de una sola vez.
+# .env con WWWUSER/WWWGROUP/APP_PORT, schema.sql cargado, venvs de los tres
+# servicios Python con su .env propio - incluido PAYMENTS_MASTER_KEY y
+# PROVISIONING_KEY en nexolu-payments-core/.env). Este script NO hace ese
+# setup de una sola vez, salvo el provisioning del Merchant/Integration de
+# Payments Core (seccion 4), que si automatiza.
 
 set -u
 
@@ -46,7 +57,7 @@ for arg in "$@"; do
         --no-tunnel) NO_TUNNEL=1 ;;
         -h|--help)
             echo "Uso: $0 [--no-tunnel]"
-            echo "  Sin flags:    pull + rebuild de los 4 repos, tuneles relanzados y verificados."
+            echo "  Sin flags:    pull + rebuild de los 5 repos, tuneles relanzados y verificados."
             echo "  --no-tunnel:  lo mismo, pero sin tocar los tuneles cloudflared ya corriendo."
             exit 0
             ;;
@@ -57,10 +68,10 @@ for arg in "$@"; do
     esac
 done
 
-# RAIZ es el directorio padre donde estan clonados como hermanos los 5 repos
-# (nexolu-pos-api, nexolu-ia-core, nexolu-comms-api, nexolu-pos-front,
-# nexolu-utils) - NO necesariamente el directorio de este archivo: este
-# script vive en nexolu-utils/build/, dos niveles por debajo de ese padre.
+# RAIZ es el directorio padre donde estan clonados como hermanos los 6 repos
+# (nexolu-pos-api, nexolu-ia-core, nexolu-comms-api, nexolu-payments-core,
+# nexolu-pos-front, nexolu-utils) - NO necesariamente el directorio de este
+# archivo: este script vive en nexolu-utils/build/, dos niveles por debajo de ese padre.
 # Se busca hacia arriba (hasta 3 niveles) el primero que tenga una carpeta
 # nexolu-pos-api adentro, para que funcione igual si alguien lo copia o lo
 # corre desde otro lado.
@@ -76,7 +87,7 @@ for _ in 1 2 3; do
 done
 if [ -z "$RAIZ" ]; then
     echo "[start-local-pos] ERROR: no encontre nexolu-pos-api cerca de $SCRIPT_DIR." >&2
-    echo "[start-local-pos] Cloná los 5 repos (nexolu-pos-api, nexolu-ia-core, nexolu-comms-api, nexolu-pos-front, nexolu-utils) como hermanos en el mismo directorio padre - ver nexolu-utils/README.md." >&2
+    echo "[start-local-pos] Cloná los 6 repos (nexolu-pos-api, nexolu-ia-core, nexolu-comms-api, nexolu-payments-core, nexolu-pos-front, nexolu-utils) como hermanos en el mismo directorio padre - ver nexolu-utils/README.md." >&2
     exit 1
 fi
 
@@ -86,6 +97,7 @@ mkdir -p "$RUNTIME_DIR"
 API_DIR="$RAIZ/nexolu-pos-api"
 IA_CORE_DIR="$RAIZ/nexolu-ia-core"
 COMMS_DIR="$RAIZ/nexolu-comms-api"
+PAYMENTS_DIR="$RAIZ/nexolu-payments-core"
 FRONT_DIR="$RAIZ/nexolu-pos-front"
 
 log() { echo "[start-local-pos] $*"; }
@@ -136,7 +148,7 @@ if [ ! -f "$API_DIR/.env" ]; then
     exit 1
 fi
 
-log "1/4 nexolu-pos-api (Sail)..."
+log "1/5 nexolu-pos-api (Sail)..."
 pull_repo "$API_DIR" "nexolu-pos-api"
 (cd "$API_DIR" && docker compose up -d --build) || { log "ERROR: docker compose up --build fallo en nexolu-pos-api."; exit 1; }
 
@@ -188,7 +200,7 @@ fi
 # ---------------------------------------------------------------------------
 # 2. nexolu-ia-core (uvicorn, puerto 8001)
 # ---------------------------------------------------------------------------
-log "2/4 nexolu-ia-core (puerto 8001)..."
+log "2/5 nexolu-ia-core (puerto 8001)..."
 pull_repo "$IA_CORE_DIR" "nexolu-ia-core"
 if [ -d "$IA_CORE_DIR/.venv" ]; then
     (cd "$IA_CORE_DIR" && .venv/bin/pip install -q -e ".[dev]")
@@ -204,7 +216,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. nexolu-comms-api (uvicorn, puerto 8002)
 # ---------------------------------------------------------------------------
-log "3/4 nexolu-comms-api (puerto 8002)..."
+log "3/5 nexolu-comms-api (puerto 8002)..."
 pull_repo "$COMMS_DIR" "nexolu-comms-api"
 if [ -d "$COMMS_DIR/.venv" ]; then
     (cd "$COMMS_DIR" && .venv/bin/pip install -q -e ".[dev]")
@@ -218,9 +230,92 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. nexolu-pos-front (Vite dentro de un contenedor node:20, puerto 5173)
+# 4. nexolu-payments-core (uvicorn, puerto 8003) - pasarela de pagos
+#    unificada (Wompi hoy). Corre en el host igual que ia-core/comms-api;
+#    nexolu-pos-api la alcanza via host.docker.internal (esta en un
+#    contenedor Sail), no localhost - ver PAYMENTS_CORE_BASE_URL en su .env.
 # ---------------------------------------------------------------------------
-log "4/4 nexolu-pos-front (puerto 5173)..."
+log "4/5 nexolu-payments-core (puerto 8003)..."
+if [ ! -d "$PAYMENTS_DIR" ]; then
+    log "ERROR: no existe $PAYMENTS_DIR - clonalo primero (nexolu-payments-core, rama main)."
+    exit 1
+fi
+pull_repo "$PAYMENTS_DIR" "nexolu-payments-core"
+if [ ! -d "$PAYMENTS_DIR/.venv" ]; then
+    log "    AVISO: no existe $PAYMENTS_DIR/.venv - saltado (setup inicial: python3 -m venv .venv && .venv/bin/pip install -e '.[dev]', cp .env.example .env con PAYMENTS_MASTER_KEY y PROVISIONING_KEY generados - ver README de ese repo)."
+else
+    (cd "$PAYMENTS_DIR" && .venv/bin/pip install -q -e ".[dev]")
+    pkill -f "uvicorn nexolu_payments_core.main:app" 2>/dev/null
+    sleep 1
+    (cd "$PAYMENTS_DIR" && nohup .venv/bin/uvicorn nexolu_payments_core.main:app --host 0.0.0.0 --port 8003 > "$RUNTIME_DIR/payments-core.log" 2>&1 &)
+    sleep 2
+    log "    Reconstruido y reiniciado, log en $RUNTIME_DIR/payments-core.log"
+
+    # Provisioning automatico del Merchant + Integration + credencial Wompi
+    # sandbox - SOLO la primera vez: el Core devuelve api_key/webhook_secret
+    # una unica vez, al crear la Integration (no hay forma de volver a
+    # pedirlos despues), asi que si nexolu-pos-api/.env ya tiene
+    # PAYMENTS_CORE_API_KEY se asume que esto ya se hizo y no se toca nada.
+    PAYMENTS_CORE_API_KEY_ACTUAL="$(grep -E '^PAYMENTS_CORE_API_KEY=' "$API_DIR/.env" 2>/dev/null | cut -d= -f2-)"
+    if [ -n "$PAYMENTS_CORE_API_KEY_ACTUAL" ]; then
+        log "    Merchant/Integration ya configurados (PAYMENTS_CORE_API_KEY presente en nexolu-pos-api/.env)."
+    else
+        log "    PAYMENTS_CORE_API_KEY vacio en nexolu-pos-api/.env - provisionando Merchant/Integration/Wompi en el Core..."
+        WOMPI_ENV_FILE="$RUNTIME_DIR/wompi-sandbox.env"
+        PROVISIONING_KEY="$(grep -E '^PROVISIONING_KEY=' "$PAYMENTS_DIR/.env" 2>/dev/null | cut -d= -f2-)"
+        if [ ! -f "$WOMPI_ENV_FILE" ]; then
+            diag "    AVISO: falta $WOMPI_ENV_FILE (WOMPI_PUBLIC_KEY/WOMPI_PRIVATE_KEY/WOMPI_INTEGRITY_SECRET/WOMPI_EVENTS_SECRET del comercio sandbox de Wompi) - salto el provisioning."
+        elif [ -z "$PROVISIONING_KEY" ]; then
+            diag "    AVISO: falta PROVISIONING_KEY en $PAYMENTS_DIR/.env - salto el provisioning."
+        else
+            # shellcheck disable=SC1090
+            source "$WOMPI_ENV_FILE"
+            json_get() { "$PAYMENTS_DIR/.venv/bin/python" -c "import json,sys; print(json.load(sys.stdin).get(\"$1\",\"\"))"; }
+
+            MERCHANT_RESP="$(curl -s -w '\n%{http_code}' -X POST "http://localhost:8003/v1/admin/merchants" \
+                -H "X-Payments-Provisioning-Key: $PROVISIONING_KEY" -H "Content-Type: application/json" \
+                -d '{"name":"Nexolu POS","slug":"nexolu-pos"}')"
+            MERCHANT_CODE="$(echo "$MERCHANT_RESP" | tail -1)"
+            MERCHANT_BODY="$(echo "$MERCHANT_RESP" | sed '$d')"
+            MERCHANT_ID=""
+
+            if [ "$MERCHANT_CODE" = "201" ]; then
+                MERCHANT_ID="$(echo "$MERCHANT_BODY" | json_get id)"
+            else
+                diag "    ERROR: no se pudo crear el Merchant en Payments Core (http_code=$MERCHANT_CODE, body=$MERCHANT_BODY)."
+                diag "    Si ya existia de una corrida anterior incompleta, borra $PAYMENTS_DIR/nexolu_payments_core.db y volve a correr este script."
+            fi
+
+            if [ -n "$MERCHANT_ID" ]; then
+                INTEGRATION_RESP="$(curl -s -w '\n%{http_code}' -X POST "http://localhost:8003/v1/admin/merchants/$MERCHANT_ID/integrations" \
+                    -H "X-Payments-Provisioning-Key: $PROVISIONING_KEY" -H "Content-Type: application/json" \
+                    -d '{"name":"Nexolu POS","slug":"nexolu-pos","environment":"sandbox","webhook_url":"http://localhost:8000/api/webhooks/payments-core"}')"
+                INTEGRATION_CODE="$(echo "$INTEGRATION_RESP" | tail -1)"
+                INTEGRATION_BODY="$(echo "$INTEGRATION_RESP" | sed '$d')"
+
+                WOMPI_RESP="$(curl -s -w '\n%{http_code}' -X POST "http://localhost:8003/v1/admin/merchants/$MERCHANT_ID/providers/wompi" \
+                    -H "X-Payments-Provisioning-Key: $PROVISIONING_KEY" -H "Content-Type: application/json" \
+                    -d "{\"environment\":\"sandbox\",\"public_key\":\"$WOMPI_PUBLIC_KEY\",\"private_key\":\"$WOMPI_PRIVATE_KEY\",\"integrity_secret\":\"$WOMPI_INTEGRITY_SECRET\",\"events_secret\":\"$WOMPI_EVENTS_SECRET\"}")"
+                WOMPI_CODE="$(echo "$WOMPI_RESP" | tail -1)"
+
+                if [ "$INTEGRATION_CODE" = "201" ] && [ "$WOMPI_CODE" = "201" ]; then
+                    NEW_API_KEY="$(echo "$INTEGRATION_BODY" | json_get api_key)"
+                    NEW_WEBHOOK_SECRET="$(echo "$INTEGRATION_BODY" | json_get webhook_secret)"
+                    sed -i "s#^PAYMENTS_CORE_API_KEY=.*#PAYMENTS_CORE_API_KEY=${NEW_API_KEY}#" "$API_DIR/.env"
+                    sed -i "s#^PAYMENTS_CORE_WEBHOOK_SECRET=.*#PAYMENTS_CORE_WEBHOOK_SECRET=${NEW_WEBHOOK_SECRET}#" "$API_DIR/.env"
+                    log "    Merchant 'nexolu-pos' + Integration + credencial Wompi sandbox creados. PAYMENTS_CORE_API_KEY/WEBHOOK_SECRET guardados en nexolu-pos-api/.env."
+                else
+                    diag "    ERROR: Merchant creado (id=$MERCHANT_ID) pero fallo la Integration (http_code=$INTEGRATION_CODE) o la credencial Wompi (http_code=$WOMPI_CODE) - revisar a mano."
+                fi
+            fi
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5. nexolu-pos-front (Vite dentro de un contenedor node:20, puerto 5173)
+# ---------------------------------------------------------------------------
+log "5/5 nexolu-pos-front (puerto 5173)..."
 if [ ! -d "$FRONT_DIR" ]; then
     log "ERROR: no existe $FRONT_DIR - clonalo primero (nexolu-pos-front, rama main)."
     exit 1
@@ -248,17 +343,22 @@ for i in $(seq 1 30); do
 done
 
 # ---------------------------------------------------------------------------
-# 5. Tuneles cloudflared (API + frontend) - se salta por completo con
-#    --no-tunnel: las URLs publicas quedan exactamente como estaban.
+# 6. Tuneles cloudflared (API + frontend + Payments Core) - se salta por
+#    completo con --no-tunnel: las URLs publicas quedan exactamente como
+#    estaban. El tunel de Payments Core es el que hay que pegar en el
+#    dashboard sandbox de Wompi como webhook URL (Wompi corre afuera, no
+#    puede pegarle a localhost:8003) - ver el resumen final de URLs.
 # ---------------------------------------------------------------------------
 API_URL=""
 FRONT_URL=""
+PAYMENTS_URL=""
 TUNELES_OK=1
 
 if [ "$NO_TUNNEL" = "1" ]; then
-    log "5/5 Tuneles cloudflared: salteados (--no-tunnel). URLs publicas sin cambios."
+    log "6/6 Tuneles cloudflared: salteados (--no-tunnel). URLs publicas sin cambios."
     API_URL="$(grep -oE '^VITE_API_BASE_URL=https://[a-zA-Z0-9.-]*' "$FRONT_DIR/.env" 2>/dev/null | sed 's/^VITE_API_BASE_URL=//')"
     FRONT_URL="$(grep -oE 'https://[a-zA-Z0-9.-]*trycloudflare\.com' "$RUNTIME_DIR/tunnel-front.log" 2>/dev/null | tail -1)"
+    PAYMENTS_URL="$(grep -oE 'https://[a-zA-Z0-9.-]*trycloudflare\.com' "$RUNTIME_DIR/tunnel-payments.log" 2>/dev/null | tail -1)"
     if [ -n "$API_URL" ]; then
         code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$API_URL" 2>/dev/null)"
         case "$code" in
@@ -269,6 +369,12 @@ if [ "$NO_TUNNEL" = "1" ]; then
         code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$FRONT_URL" 2>/dev/null)"
         case "$code" in
             000|5*) diag "    AVISO: el tunel del frontend que ya tenias configurado no responde bien ahora mismo (http_code=$code). Correr sin --no-tunnel para renovarlo."; TUNELES_OK=0 ;;
+        esac
+    fi
+    if [ -n "$PAYMENTS_URL" ]; then
+        code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$PAYMENTS_URL/health" 2>/dev/null)"
+        case "$code" in
+            000|5*) diag "    AVISO: el tunel de Payments Core que ya tenias configurado no responde bien ahora mismo (http_code=$code). Correr sin --no-tunnel para renovarlo."; TUNELES_OK=0 ;;
         esac
     fi
 else
@@ -339,9 +445,10 @@ else
     if ! command -v cloudflared >/dev/null 2>&1; then
         log "AVISO: cloudflared no esta instalado - salto los tuneles (frontend/API solo disponibles en localhost)."
     else
-        log "5/5 Tuneles cloudflared (matando procesos viejos y verificando los nuevos)..."
+        log "6/6 Tuneles cloudflared (matando procesos viejos y verificando los nuevos)..."
         API_URL="$(lanzar_tunel_verificado 8000 "$RUNTIME_DIR/tunnel-api.log" "$RUNTIME_DIR/tunnel-api.pid" "Tunel API")" || TUNELES_OK=0
         FRONT_URL="$(lanzar_tunel_verificado 5173 "$RUNTIME_DIR/tunnel-front.log" "$RUNTIME_DIR/tunnel-front.pid" "Tunel frontend")" || TUNELES_OK=0
+        PAYMENTS_URL="$(lanzar_tunel_verificado 8003 "$RUNTIME_DIR/tunnel-payments.log" "$RUNTIME_DIR/tunnel-payments.pid" "Tunel Payments Core")" || TUNELES_OK=0
 
         if [ -n "$API_URL" ]; then
             log "    Apuntando VITE_API_BASE_URL al tunel de la API y reiniciando el front..."
@@ -381,9 +488,12 @@ fi
 echo "  API local:         http://localhost:8000"
 echo "  IA Core local:     http://localhost:8001"
 echo "  Comms API local:   http://localhost:8002"
+echo "  Payments Core local: http://localhost:8003"
 echo "  Frontend local:    http://localhost:5173"
-[ -n "$API_URL" ]   && echo "  API tunel:          $API_URL"
-[ -n "$FRONT_URL" ] && echo "  Frontend tunel:     $FRONT_URL   <- abrir esto desde el celular"
+[ -n "$API_URL" ]      && echo "  API tunel:          $API_URL"
+[ -n "$FRONT_URL" ]    && echo "  Frontend tunel:     $FRONT_URL   <- abrir esto desde el celular"
+[ -n "$PAYMENTS_URL" ] && echo "  Payments Core tunel: $PAYMENTS_URL"
+[ -n "$PAYMENTS_URL" ] && echo "  Webhook Wompi:      ${PAYMENTS_URL}/v1/webhooks/wompi   <- pegar en el dashboard sandbox de Wompi"
 echo "  Login demo:        demo@nexolu.test / password123"
 
 [ "$TUNELES_OK" = "1" ] || exit 1
