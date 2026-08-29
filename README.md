@@ -4,6 +4,12 @@ Punto de entrada para entender el ecosistema de Nexolú y sumarte a la
 migración del monolito legacy a una arquitectura API-first. Si sos nuevo en
 el proyecto, empezá por acá antes de tocar cualquier repo.
 
+**Este README da el mapa general.** Para el detalle técnico (inventario de
+endpoints por servicio, contratos de integración entre repos, topología
+real de infraestructura, modelo de datos) ver [`docs/`](docs/README.md).
+Si sos nuevo en el equipo, la ruta de onboarding completa está en
+[`docs/onboarding.md`](docs/onboarding.md).
+
 ## Qué es Nexolú
 
 Nexolú es un POS (punto de venta) SaaS para negocios colombianos - tiendas,
@@ -44,10 +50,17 @@ Cada repo tiene mas descripción en su propio readme.
 | [`nexolu-pos-front`](https://github.com/mattchaparro/nexolu-pos-front) | Frontend nuevo, SPA | Vue 3, Vite, Pinia, TanStack Query, Tailwind v4, PrimeVue | En migración activa - ver `docs/BACKEND_READINESS.md` ahí |
 | [`nexolu-ia-core`](https://github.com/mattchaparro/nexolu-ia-core) | Asistente de IA, compartido por todos los productos Nexolú (no solo POS) | Python, FastAPI, SQLAlchemy async, Alembic | Servicio nuevo, ya integrado con el POS |
 | [`nexolu-comms-api`](https://github.com/mattchaparro/nexolu-comms-api) | Envío de WhatsApp/email, compartido por todos los productos | Python, FastAPI, SQLAlchemy async, Alembic | Servicio nuevo, interfaces del lado del POS ya listas, corte real pendiente |
-| [nexolu-payments-core](https://github.com/mattchaparro/nexolu-payments-core) | Cobros de suscripción (Wompi), compartido por todos los productos | (no clonado localmente todavía) | Ya integrado con el POS (checkout de suscripción) |
+| [nexolu-payments-core](https://github.com/mattchaparro/nexolu-payments-core) | Cobros de suscripción (Wompi), compartido por todos los productos | Python, FastAPI, SQLAlchemy async, Alembic | Ya integrado con el POS (checkout de suscripción), multi-merchant desde el diseño |
+| [`nexolu-admin`](https://github.com/mattchaparro/nexolu-admin) | BFF del panel SuperAdmin interno - orquesta pos-api/ia-core/comms-api/payments-core y la infraestructura (deploys, droplets) | Python, FastAPI, sin base de datos propia | En uso activo, administra SG y producción |
+| [`nexolu-admin-front`](https://github.com/mattchaparro/nexolu-admin-front) | SPA del panel SuperAdmin (consume `nexolu-admin`) | Vue 3, Vite, Pinia, TanStack Query, PrimeVue | En uso activo |
+| [`nexolu-infra`](https://github.com/mattchaparro/nexolu-infra) | Infraestructura como código: `docker-compose.yml`, vhosts nginx, script de deploy (`deploy-menu.sh`) para SG/producción | Docker Compose, nginx, bash | En uso activo - no orquesta el droplet del panel admin (ver `docs/infra/`) |
 | `pos-saas` (GitLab: `gitlab.com:mattchaparrof/pos-saas`) | **El monolito legacy, todavía en producción** (`pos.nexolu.co`) | Laravel 10 + Inertia + Vue 3 | Fuente de verdad de lo que hay que migrar - se va reduciendo módulo por módulo |
 | `pos-saas-legacy` (GitHub, snapshot local) | Copia de referencia del monolito (un solo commit, para no depender de acceso a GitLab) | igual que `pos-saas` | Solo lectura, para consultar código/`CONTEXT.md`/`ARCHITECTURE.md` |
 | `nexolu-utils` (este repo) | Documentación de arquitectura + herramientas de desarrollo local | - | - |
+
+Detalle completo de cada repo (endpoints, autenticación, integraciones) en
+[`docs/apis/`](docs/apis/) y [`docs/infra/`](docs/infra/) (este último con
+la topología real de droplets/IPs/dominios - uso interno).
 
 Todos, salvo el monolito, se clonan como **hermanos** en el mismo
 directorio padre - ver `build/README.md` para el setup local completo.
@@ -67,6 +80,12 @@ graph LR
 
     API -.->|"MessagingChannel interface<br/>(corte real pendiente)"| Comms["nexolu-comms-api<br/>FastAPI"]
     API -->|checkout + webhooks firmados| Payments["Nexolu Payments Core<br/>(no local)"]
+
+    AdminFront["nexolu-admin-front<br/>Vue 3 SPA"] -->|"REST + Bearer (JWT propio)"| Admin["nexolu-admin<br/>BFF, sin DB propia"]
+    Admin -->|"proxy autenticado<br/>merchants/integrations/Wompi"| Payments
+    Admin -->|"proxy autenticado<br/>apps/keys/uso"| IA
+    Admin -->|"proxy autenticado<br/>apps/credenciales"| Comms
+    Admin -.->|"SSH: deploy-menu.sh<br/>snapshot/power-on/off"| Droplets[("droplets DigitalOcean<br/>via nexolu-infra")]
 ```
 
 ### Frontend ↔ Backend
@@ -134,6 +153,29 @@ Payments Core confirma por webhook firmado (`X-Nexolu-Signature`/
 sus propios webhooks entrantes). Ya migrado, no corre local todavía (no
 hace falta para desarrollar el resto).
 
+### El panel SuperAdmin (`nexolu-admin` + `nexolu-admin-front`)
+
+Herramienta operativa **interna del equipo** (no para clientes finales),
+en un droplet aparte de todo lo demás a propósito - si SG o producción
+tienen un incidente, el panel que se usa para operarlos sigue vivo. No
+tiene base de datos propia: es un BFF que (a) hace *proxy* autenticado
+hacia el admin-API de `nexolu-payments-core`/`nexolu-ia-core`/
+`nexolu-comms-api` (crear apps/merchants, rotar API keys, configurar
+credenciales de proveedor - Wompi, Meta WhatsApp, Brevo - sin que esos
+secretos toquen el frontend), y (b) dispara deploys y operaciones de
+infraestructura por SSH contra los droplets reales, invocando
+`nexolu-infra/deploy-menu.sh` del lado del servidor. Detalle completo en
+[`docs/apis/admin-bff.md`](docs/apis/admin-bff.md).
+
+### `nexolu-infra`: cómo se despliega todo esto
+
+Repo de infraestructura como código (Docker Compose + vhosts nginx +
+`deploy-menu.sh`) para los droplets de SG y producción - **no** orquesta
+el droplet donde vive el propio panel admin (ese se despliega a mano, con
+el `deploy.sh` de cada uno de esos dos repos). Topología real
+(droplets/IPs/dominios) y el paso a paso de cómo se despliega cada
+servicio en [`docs/infra/`](docs/infra/).
+
 ## Convenciones que cruzan todos los repos
 
 - **Idioma**: identificadores de código (clases, variables, nombres de
@@ -164,18 +206,17 @@ para poder abrir el frontend desde el celular.
 
 ## Para nuevos contribuyentes
 
-1. Leé este README completo antes de tocar código.
+Checklist completo (accesos, orden de lectura, setup local, qué revisar
+antes de migrar un módulo) en **[`docs/onboarding.md`](docs/onboarding.md)**.
+Resumen rápido:
+
+1. Leé este README completo, después [`docs/README.md`](docs/README.md)
+   (el índice de toda la documentación técnica).
 2. Pedí acceso a los repos de GitHub listados arriba (y a GitLab si vas a
    necesitar consultar `pos-saas`, el monolito real en producción).
 3. Seguí `build/README.md` para levantar todo en local.
-4. Antes de trabajar en un repo puntual, leé su `CLAUDE.md` - tiene las
-   reglas de ese repo específicamente (convenciones, qué no romper, cómo
-   correr sus tests).
-5. Si vas a migrar un módulo del monolito: revisá primero
-   `nexolu-pos-api/docs/MIGRATION_BACKLOG.md` (si ya está listado, seguí
-   ahí el estado) y `docs/CUTOVER_TODO.md` (si tu módulo toca una tabla
-   compartida con el monolito, leé eso antes de "arreglar" un dato).
-6. Si usás Claude Code (u otro agente) para las tareas: dale el contexto de
+4. Antes de trabajar en un repo puntual, leé su `CLAUDE.md`.
+5. Si usás Claude Code (u otro agente) para las tareas: dale el contexto de
    este README primero (o pedile que lo lea) antes de pedirle que
    implemente algo - así entiende qué repo migra qué, y por qué ciertas
    cosas (compartir la base de datos con el monolito, no correr
