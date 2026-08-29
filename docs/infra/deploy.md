@@ -44,14 +44,41 @@ máquina:
 if docker compose config --services | grep -qx frontend; then
     # patrón SG: dev server de Vite en contenedor con bind mount
 elif [ -x ../nexolu-pos-front/deploy.sh ]; then
-    # patrón producción: git pull && npm install && npm run build,
-    # nginx del host sirve dist/ directo, sin contenedor
+    # patrón producción: build en contenedor efímero con tope de memoria,
+    # publicado como release atómica; nginx del host sirve el symlink
+    # `current`
 fi
 ```
 
 Si el `docker-compose.yml` mezclado con el override local de ESE droplet
 define un servicio llamado `frontend`, es SG. Si no, pero hay un
 `deploy.sh` ejecutable en `../nexolu-pos-front/`, es producción.
+
+#### Producción: releases atómicas, no `dist/` en vivo
+
+Desde el 2026-08-28 el patrón de producción **no** corre `npm` en el host.
+`nexolu-pos-front/deploy.sh`:
+
+1. Compila dentro de un `node:22-alpine` efímero con `--memory` (por
+   defecto 1200m) — el build no puede tocar la RAM de MySQL/pos-api.
+2. Publica el resultado en `releases/<timestamp>/`.
+3. Mueve el symlink `current` con `mv -T` (rename atómico).
+4. Deja `previous` apuntando a la release anterior; nginx la usa como
+   fallback de assets para las pestañas ya abiertas.
+
+Comandos: `deploy.sh [deploy|rollback|status]`. `rollback` solo mueve
+symlinks, es instantáneo.
+
+Motivo: el 2026-08-28 el `npm run build` sobre el host agotó los 2 GB de
+`nexolu-pos-prod` (sin swap, sin límites por cgroup) y **colgó el droplet
+entero**, dejando sin servicio a los negocios ya migrados. Además el build
+escribía dentro del `dist/` que nginx estaba sirviendo, así que durante el
+build los clientes veían una app rota. Detalle completo en
+`nexolu-infra/docs/DEPLOY_POS_FRONT.md`.
+
+**Todos los droplets deben tener swap** (`bootstrap.sh` ahora lo crea): sin
+swap un pico de memoria no dispara el OOM killer de forma ordenada, cuelga
+la máquina sin dejar ni SSH.
 
 ### Advertencia: MySQL en `nexolu-core`
 
