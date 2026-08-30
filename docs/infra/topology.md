@@ -24,7 +24,7 @@ en la VPC por defecto:
 |---|---|---|---|---|---|
 | **`nexolu-core`** | `134.122.19.243` | `10.116.0.5` | `s-1vcpu-2gb` (2GB RAM, 50GB disco) | `ia-core`, `comms-api`, `payments-core` | `nexolu`, `core`, `production` |
 | **`nexolu-pos-prod`** | `174.138.42.118` | `10.116.0.6` | `s-1vcpu-2gb` (2GB RAM, 50GB disco) | `pos-api`, `pos-front`, **MySQL + Redis compartidos** | `nexolu`, `pos`, `production` |
-| **`nexolu`** | `134.122.116.201` (+ IP reservada `174.138.110.88`, sin uso activo en DNS hoy) | `10.116.0.3` | `s-1vcpu-2gb` (2GB RAM, 50GB disco) | Monolito legacy `pos-saas` + panel `nexolu-admin`/`nexolu-admin-front` | *(sin tags)* |
+| **`nexolu`** | `134.122.116.201` (+ IP reservada `174.138.110.88`, sin uso activo en DNS hoy) | `10.116.0.3` | `s-1vcpu-2gb` (2GB RAM, 50GB disco) | Monolito legacy `pos-saas` + panel `nexolu-admin`/`nexolu-admin-front` + `nexolu-spa-api`/`nexolu-spa-front` | *(sin tags)* |
 | **`nexolu-pos-sg`** | `167.71.31.140` (efímera) / **reservada `134.209.129.58`** (la que usa DNS) | `10.116.0.4` | `s-1vcpu-2gb` (2GB RAM, 50GB disco) | Staging/SG: todo el stack nuevo junto | `nexolu`, `pos-sg`, `migration` |
 
 Ambos `nexolu-core` y `nexolu-pos-prod` fueron creados el 2026-08-26 (Ubuntu
@@ -44,18 +44,46 @@ reservada, no a la efímera — así no hay que tocar DNS en cada ciclo.
 
 Hay un quinto droplet en la cuenta, **`sga-app`** (`104.248.230.120`, IP
 reservada `146.190.186.24`), sin tags, imagen Laravel 10.0 retirada, creado
-en 2023-04. No aparece en ningún repo de Nexolú ni en `nexolu-infra` —
-parece un proyecto viejo/no relacionado (posible candidato a revisar si
-sigue en uso, o darlo de baja si no).
+en 2023-04. No aparece en ningún repo de Nexolú ni en `nexolu-infra`.
+
+> **No darlo de baja sin verificar antes.** Una versión anterior de este
+> documento lo daba por no relacionado y sugería apagarlo, pero
+> `pos-saas-legacy/scripts/deploy.sh:29` usa esa MISMA IP
+> (`104.248.230.120`) como staging de SG. Uno de los dos está
+> desactualizado y nadie ha confirmado cuál. Hasta que alguien entre y mire
+> qué sirve, tratarlo como en uso.
 
 ## Dominios y DNS
 
 **`nexolu.co` (y todos sus subdominios) NO está gestionado en esta cuenta de
 DigitalOcean** — el `domain-list` de la cuenta solo trae dominios de otros
 proyectos (`easytickets.com.co`, `luxurynails.com.co`, `gbsibate.com`,
-`cafe.chaparro.dev`). El DNS real de `nexolu.co` vive en otro proveedor
-(registrador o Cloudflare) que no verifiqué en esta pasada — **pendiente de
-documentar dónde exactamente** (avisar si hace falta que lo busque).
+`cafe.chaparro.dev`).
+
+**El DNS vive en Hostinger** (verificado el 2026-08-30):
+
+```bash
+nslookup -type=NS nexolu.co 8.8.8.8
+# nexolu.co  nameserver = nebula.dns-parking.com
+# nexolu.co  nameserver = aurora.dns-parking.com
+```
+
+`nebula`/`aurora.dns-parking.com` son los nameservers de Hostinger. Los
+registros A se crean **en el panel de Hostinger**, no en DigitalOcean y no
+con `doctl`. Esto es lo que bloqueaba `certbot` para cualquier subdominio
+nuevo: sin el A record publicado, la validación HTTP-01 falla.
+
+Estado de los subdominios el 2026-08-30 (todos resolviendo a
+`134.122.116.201`, el droplet legacy):
+
+| Subdominio | Resuelve | Nota |
+|---|---|---|
+| `nexolu.co`, `www` | `134.122.116.201` | |
+| `pos.nexolu.co` | `134.122.116.201` | monolito en producción |
+| `admin.nexolu.co` | `134.122.116.201` | panel estático |
+| `api-admin.nexolu.co` | `134.122.116.201` | contenedor del panel |
+| `spa.nexolu.co` | **no existe** | pendiente de crear |
+| `spa-backend.nexolu.co` | **no existe** | pendiente de crear |
 
 Igual, según el código de cada repo (`nginx/*.conf`, `.env.example`,
 `docs/PRODUCTION_SETUP.md`), estos son los subdominios reales en uso y a qué
@@ -114,7 +142,7 @@ exponer la base a internet.
 
 ### `nexolu` (`134.122.116.201`) — el droplet "viejo"
 
-Corre **tres cosas que no tienen nada que ver con `nexolu-infra`** (ese
+Corre **cinco cosas que no tienen nada que ver con `nexolu-infra`** (ese
 repo no lo toca en absoluto):
 
 1. **`pos-saas`** (el monolito legacy, Laravel + Inertia) — sigue siendo la
@@ -126,10 +154,45 @@ repo no lo toca en absoluto):
    bash deploy.sh'`).
 3. **`nexolu-admin-front`** (SPA del panel) — build local + `rsync` de
    `dist/` a `/var/www/admin.nexolu.co/`.
+4. **`nexolu-spa-api`** (agenda para spas y barberías) — contenedor Docker
+   suelto, mismo patrón que `nexolu-admin`. Escucha en **8030** y usa
+   `--network host`.
+5. **`nexolu-spa-front`** — build local + `rsync`, igual que el panel.
 
 Deliberadamente en un droplet **aparte** de los dos anteriores: si SG se
 rompe o si `nexolu-pos-prod`/`nexolu-core` tienen un incidente, el panel que
 se usa para operarlos sigue vivo.
+
+#### Por qué el spa vive acá, y las tres restricciones que impone
+
+Este droplet tiene **1 vCPU compartido con el MySQL y el `php8.2-fpm` que
+sirven `pos.nexolu.co` en producción**. De ahí salen tres reglas que no se
+cambian sin pensarlo:
+
+1. **`--network host`, no bridge.** El MySQL es nativo y escucha en
+   `127.0.0.1`. Con red bridge habría que abrirle el `bind-address` al rango
+   de Docker — o sea, tocarle la configuración a la base que sirve la
+   producción real. Con red de host el contenedor llega directo y no se toca
+   nada. El costo es que el nginx interno del contenedor escucha en **8030**:
+   el 80 ya es del nginx del sistema y el **8001 es de `nexolu-admin`**.
+2. **El frontend nunca se compila acá.**
+   `pos-saas-legacy/scripts/pos_deploy.sh:44-52` lo midió: compilar en este
+   servidor degrada las requests en vivo entre 100 y 800 veces. Los dos
+   frontends se compilan en la máquina del dev y se suben ya construidos.
+3. **`nice`/`ionice` en el build de la imagen**, por lo mismo: mientras
+   `pos-saas` siga sirviendo tráfico real, un deploy no puede monopolizar el
+   único core.
+
+**Base de datos propia** (`nexolu_spa`) con usuario propio, no la de
+`pos-saas`: si algo del spa se descontrola, no puede tocar la base del
+monolito.
+
+**Desde el panel admin:** `spa-api` está registrado como servicio
+desplegable y con `.env` editable (`nexolu-admin/app/infra/env_files.py`).
+Como este droplet no tiene `nexolu-infra` clonado, no usa `deploy-menu.sh`
+sino el `deploy.sh` del propio repo — ver `SERVICE_DEPLOY_COMMANDS`.
+`spa-front` **no** aparece ahí: es un bundle de Vite, sus variables se
+hornean al compilar y editarlas en el servidor no cambiaría nada.
 
 ### `nexolu-pos-sg` (efímera `167.71.31.140` / reservada `134.209.129.58`)
 
