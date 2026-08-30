@@ -82,8 +82,15 @@ Estado de los subdominios el 2026-08-30 (todos resolviendo a
 | `pos.nexolu.co` | `134.122.116.201` | monolito en producción |
 | `admin.nexolu.co` | `134.122.116.201` | panel estático |
 | `api-admin.nexolu.co` | `134.122.116.201` | contenedor del panel |
-| `spa.nexolu.co` | **no existe** | pendiente de crear |
-| `spa-backend.nexolu.co` | **no existe** | pendiente de crear |
+| `agenda.nexolu.co` | **no existe** | pendiente de crear → `nexolu-spa-front` |
+| `agenda-backend.nexolu.co` | **no existe** | pendiente de crear → `nexolu-spa-api` |
+
+**Por qué `agenda` y no `spa`**, aunque los repos se llamen `nexolu-spa-*`:
+el producto atiende spas de uñas, barberías y centros de estética (las tres
+verticales están en `BusinessFeaturePresets::verticals()`), y
+`spa.nexolu.co` lo encerraba en una sola delante del cliente. El dominio es
+lo que ve la gente; el nombre del repo es interno y renombrarlo rompe
+clones, remotos, la deploy key y el mapeo de servicios del panel.
 
 Igual, según el código de cada repo (`nginx/*.conf`, `.env.example`,
 `docs/PRODUCTION_SETUP.md`), estos son los subdominios reales en uso y a qué
