@@ -106,6 +106,7 @@ apuntan:
 | `ia.nexolu.co` | `nexolu-core` (`134.122.19.243`) | `nexolu-ia-core`, puerto interno `127.0.0.1:8000` |
 | `comms.nexolu.co` | `nexolu-core` (`134.122.19.243`) | `nexolu-comms-api`, puerto interno `127.0.0.1:8010` |
 | `payments.nexolu.co` | `nexolu-core` (`134.122.19.243`) | `nexolu-payments-core`, puerto interno `127.0.0.1:8020` |
+| `auth.nexolu.co` | `nexolu-core` (`134.122.19.243`) | `nexolu-auth` (identidad), puerto interno `127.0.0.1:8030` |
 | `api-sg.nexolu.co`, `ia-sg.nexolu.co`, `comms-sg.nexolu.co`, `payments-sg.nexolu.co`, `new-pos-sg.nexolu.co` | `nexolu-pos-sg` (IP reservada `134.209.129.58`) | Mismo stack que producción, todo junto en un solo droplet, para staging/pruebas |
 
 Dominios asociados a productos futuros/en incubación, **registrados pero
@@ -128,8 +129,18 @@ no se confundan si aparecen al mirar el dashboard de DO.
 
 Stack Python puro, orquestado por `nexolu-infra/docker-compose.yml`:
 `ia-core` (`127.0.0.1:8000`), `comms-api` (`127.0.0.1:8010`),
-`payments-core` (`127.0.0.1:8020`). Nginx del host hace `proxy_pass` a esos
-tres puertos según el `Host` de cada request. **No tiene su propio MySQL
+`payments-core` (`127.0.0.1:8020`), `auth` (`127.0.0.1:8030`). Nginx del
+host hace `proxy_pass` a esos cuatro puertos según el `Host` de cada
+request.
+
+Desde que `auth` vive acá, este droplet aloja la **identidad** con la que
+se entra a los cuatro sistemas. No lo pone en el camino crítico de nadie
+—los consumidores verifican con la llave pública sin llamarlo—, pero sí
+significa que sin él nadie inicia una sesión nueva. El panel no puede
+apagarlo: `_NEVER_POWER_CYCLE` cubre todo el ambiente `prod`
+(`nexolu-admin/app/infra/router.py`, con test de regresión), y el
+break-glass de `ADMIN_EMAIL`/`ADMIN_PASSWORD_HASH` sigue abriendo el panel
+aunque `auth` esté caído. **No tiene su propio MySQL
 local en producción** — le habla a la base de `nexolu-pos-prod` cruzando la
 VPC (ver siguiente sección). Este es el único droplet donde `docker compose
 up -d mysql redis` de `deploy-menu.sh` sería redundante/conflictivo si se

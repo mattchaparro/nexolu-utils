@@ -5,6 +5,7 @@
 #   - nexolu-ia-core      (uvicorn, :8001)
 #   - nexolu-comms-api    (uvicorn, :8002)
 #   - nexolu-payments-core (uvicorn, :8003) - pasarela de pagos unificada
+#   - nexolu-auth         (uvicorn, :8004) - identidad centralizada (SSO)
 #     (Wompi hoy). nexolu-pos-api la alcanza via host.docker.internal, no
 #     localhost, porque corre en un contenedor Sail - ver PAYMENTS_CORE_BASE_URL
 #     en su .env. La primera vez que corre este script, si nexolu-pos-api/.env
@@ -98,6 +99,7 @@ API_DIR="$RAIZ/nexolu-pos-api"
 IA_CORE_DIR="$RAIZ/nexolu-ia-core"
 COMMS_DIR="$RAIZ/nexolu-comms-api"
 PAYMENTS_DIR="$RAIZ/nexolu-payments-core"
+AUTH_DIR="$RAIZ/nexolu-auth"
 FRONT_DIR="$RAIZ/nexolu-pos-front"
 
 log() { echo "[start-local-pos] $*"; }
@@ -148,7 +150,7 @@ if [ ! -f "$API_DIR/.env" ]; then
     exit 1
 fi
 
-log "1/5 nexolu-pos-api (Sail)..."
+log "1/6 nexolu-pos-api (Sail)..."
 pull_repo "$API_DIR" "nexolu-pos-api"
 (cd "$API_DIR" && docker compose up -d --build) || { log "ERROR: docker compose up --build fallo en nexolu-pos-api."; exit 1; }
 
@@ -200,7 +202,7 @@ fi
 # ---------------------------------------------------------------------------
 # 2. nexolu-ia-core (uvicorn, puerto 8001)
 # ---------------------------------------------------------------------------
-log "2/5 nexolu-ia-core (puerto 8001)..."
+log "2/6 nexolu-ia-core (puerto 8001)..."
 pull_repo "$IA_CORE_DIR" "nexolu-ia-core"
 if [ -d "$IA_CORE_DIR/.venv" ]; then
     (cd "$IA_CORE_DIR" && .venv/bin/pip install -q -e ".[dev]")
@@ -216,7 +218,7 @@ fi
 # ---------------------------------------------------------------------------
 # 3. nexolu-comms-api (uvicorn, puerto 8002)
 # ---------------------------------------------------------------------------
-log "3/5 nexolu-comms-api (puerto 8002)..."
+log "3/6 nexolu-comms-api (puerto 8002)..."
 pull_repo "$COMMS_DIR" "nexolu-comms-api"
 if [ -d "$COMMS_DIR/.venv" ]; then
     (cd "$COMMS_DIR" && .venv/bin/pip install -q -e ".[dev]")
@@ -235,7 +237,7 @@ fi
 #    nexolu-pos-api la alcanza via host.docker.internal (esta en un
 #    contenedor Sail), no localhost - ver PAYMENTS_CORE_BASE_URL en su .env.
 # ---------------------------------------------------------------------------
-log "4/5 nexolu-payments-core (puerto 8003)..."
+log "4/6 nexolu-payments-core (puerto 8003)..."
 if [ ! -d "$PAYMENTS_DIR" ]; then
     log "ERROR: no existe $PAYMENTS_DIR - clonalo primero (nexolu-payments-core, rama main)."
     exit 1
@@ -313,9 +315,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5. nexolu-pos-front (Vite dentro de un contenedor node:20, puerto 5173)
+# 5. nexolu-auth (uvicorn, puerto 8004) - identidad centralizada.
+#    Opcional: si no esta clonado o sin .venv, se salta y cada producto
+#    sigue entrando por su propio login, que es justo lo que pasa cuando
+#    NEXOLU_AUTH_PUBLIC_KEYS esta vacia en produccion.
 # ---------------------------------------------------------------------------
-log "5/5 nexolu-pos-front (puerto 5173)..."
+log "5/6 nexolu-auth (puerto 8004)..."
+if [ ! -d "$AUTH_DIR" ]; then
+    log "    AVISO: no existe $AUTH_DIR - saltado (el SSO no arranca; cada app usa su login propio)."
+elif [ ! -d "$AUTH_DIR/.venv" ]; then
+    log "    AVISO: no existe $AUTH_DIR/.venv - saltado (setup inicial: python3 -m venv .venv && .venv/bin/pip install -e '.[dev]', cp .env.example .env y generar el par con .venv/bin/python -m scripts.generate_keypair - ver README de ese repo)."
+else
+    pull_repo "$AUTH_DIR" "nexolu-auth"
+    (cd "$AUTH_DIR" && .venv/bin/pip install -q -e ".[dev]")
+    pkill -f "uvicorn nexolu_auth.main:app" 2>/dev/null
+    sleep 1
+    (cd "$AUTH_DIR" && nohup .venv/bin/uvicorn nexolu_auth.main:app --host 0.0.0.0 --port 8004 > "$RUNTIME_DIR/auth.log" 2>&1 &)
+    sleep 2
+    log "    Reconstruido y reiniciado, log en $RUNTIME_DIR/auth.log"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. nexolu-pos-front (Vite dentro de un contenedor node:20, puerto 5173)
+# ---------------------------------------------------------------------------
+log "6/6 nexolu-pos-front (puerto 5173)..."
 if [ ! -d "$FRONT_DIR" ]; then
     log "ERROR: no existe $FRONT_DIR - clonalo primero (nexolu-pos-front, rama main)."
     exit 1
@@ -343,7 +366,7 @@ for i in $(seq 1 30); do
 done
 
 # ---------------------------------------------------------------------------
-# 6. Tuneles cloudflared (API + frontend + Payments Core) - se salta por
+# 7. Tuneles cloudflared (API + frontend + Payments Core) - se salta por
 #    completo con --no-tunnel: las URLs publicas quedan exactamente como
 #    estaban. El tunel de Payments Core es el que hay que pegar en el
 #    dashboard sandbox de Wompi como webhook URL (Wompi corre afuera, no
@@ -489,6 +512,7 @@ echo "  API local:         http://localhost:8000"
 echo "  IA Core local:     http://localhost:8001"
 echo "  Comms API local:   http://localhost:8002"
 echo "  Payments Core local: http://localhost:8003"
+echo "  Auth local:        http://localhost:8004"
 echo "  Frontend local:    http://localhost:5173"
 [ -n "$API_URL" ]      && echo "  API tunel:          $API_URL"
 [ -n "$FRONT_URL" ]    && echo "  Frontend tunel:     $FRONT_URL   <- abrir esto desde el celular"
