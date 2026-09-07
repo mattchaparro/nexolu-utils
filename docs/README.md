@@ -38,6 +38,10 @@ por acá directamente.
   verificado en vivo contra DigitalOcean.
 - [`deploy.md`](infra/deploy.md) — `deploy-menu.sh`, el panel admin, qué
   no pasa por ninguno de los dos, diferencias por ambiente.
+- [`trafico-basura-y-bloqueos.md`](infra/trafico-basura-y-bloqueos.md) —
+  runbook de "el POS está lento": cómo distinguir una caída real de la
+  ventana de un despliegue, medir e identificar tráfico de bots, y bloquear
+  IPs sin romper Docker. Incluye qué defensas hay y cuáles faltan.
 
 ## Para presentaciones / material externo
 
