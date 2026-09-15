@@ -32,6 +32,20 @@ por acá directamente.
 - [`payments-wompi.md`](integrations/payments-wompi.md) — flujo completo
   de checkout de suscripción y el esquema HMAC de webhooks.
 
+### `research/` — investigación y diseño previo a construir
+
+- [`whatsapp-catalogo-carrito-manychat-brief.md`](research/whatsapp-catalogo-carrito-manychat-brief.md)
+  — brief de Alejandro (2026-09-14) sobre WhatsApp como canal comercial.
+- [`whatsapp-capacidad-transversal.md`](research/whatsapp-capacidad-transversal.md)
+  — el resultado: qué permite Meta hoy (verificado), arquitectura por
+  capacidad sobre `nexolu-comms-api`, y el plan de migración de Luxury
+  Nails desde ManyChat.
+- [`whatsapp-plan-implementacion.md`](research/whatsapp-plan-implementacion.md)
+  — el tablero de implementación de **Nexolú Connect** (fases 0–5, qué
+  quedó hecho y cuándo): comms-api endurecido, canales por negocio,
+  panel `nexolu-comms-front` (connect.nexolu.co) con SSO y clientes
+  externos.
+
 ### `infra/` — **uso interno, contiene IPs y datos operativos reales**
 
 - [`topology.md`](infra/topology.md) — droplets, IPs, VPC, dominios,
