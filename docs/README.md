@@ -48,6 +48,12 @@ por acá directamente.
 
 ### `infra/` — **uso interno, contiene IPs y datos operativos reales**
 
+- [`connect-runbook-alejandro.md`](infra/connect-runbook-alejandro.md) —
+  **el checklist operativo de Nexolú Connect**: Meta (App de plataforma,
+  Tech Provider, App Review), SSO, env vars, deploy keys, cutover del POS
+  y migración de Luxury, en orden de dependencias.
+- [`connect-front.md`](infra/connect-front.md) — alta de connect.nexolu.co
+  (DNS, deploy key, nginx+certbot, primer deploy).
 - [`topology.md`](infra/topology.md) — droplets, IPs, VPC, dominios,
   verificado en vivo contra DigitalOcean.
 - [`deploy.md`](infra/deploy.md) — `deploy-menu.sh`, el panel admin, qué
