@@ -9,6 +9,29 @@ se reduce a minutos, con el menor tráfico posible (1–4 am).
 límites (misma WABA, ruta A de la sección M). **Qué SÍ se pierde:** el
 historial de chats de ManyChat. Ninguna herramienta lo transfiere.
 
+> ⚠️ **LA SIM DEL NÚMERO YA NO EXISTE (Pillofón salió de Colombia).**
+> Por eso hay tres cosas que NO se hacen, porque exigen un código SMS o de
+> llamada al número, y ese código no tendríamos cómo recibirlo:
+>
+> 1. **NUNCA borrar el número** de WhatsApp Manager (ícono de papelera).
+>    La ayuda de ManyChat dice que, después de desconectar, se borre el
+>    número del Business Manager: **ese paso se ignora**. Borrarlo y
+>    volverlo a agregar exige verificar el número por SMS.
+> 2. **No mover el número a otra WABA** (ruta B). La migración
+>    programática de Meta exige código SMS o de llamada.
+> 3. **No desactivar ni reemplazar la cuenta de WhatsApp Business** de Luxury.
+>
+> Lo que SÍ se puede sin SIM (verificado en la documentación de Meta):
+> - Que otra app use la misma WABA (ruta A). El número sigue registrado.
+> - Registrar de nuevo el número, si ManyChat lo desregistró: solo pide
+>   el **PIN** de verificación en dos pasos, no un SMS. Desregistrar no
+>   borra el número.
+> - Cambiar el PIN desde WhatsApp Manager, como administrador.
+>
+> Seguro recomendado: recuperar la línea con el operador que absorbió a
+> Pillofón. Solo sirve por si Meta algún día pide verificar el número
+> de nuevo.
+
 **Día sugerido:** madrugada de miércoles a jueves o de jueves a viernes.
 Evitar la del viernes: el fin de semana es cuando más se agenda y no
 queremos estrenar ahí.
@@ -55,7 +78,7 @@ queremos estrenar ahí.
 | 0 | Mandarle un mensaje al número real desde tu teléfono: confirmar que ManyChat contesta (es el "antes") | Alejandro |
 | 5 | Cargar en Connect el canal propio de Luxury: `PHONE_NUMBER_ID`, `WABA_ID`, token | Alejandro (panel) / yo reviso |
 | 10 | Suscribir nuestra app a la WABA: `POST /{WABA_ID}/subscribed_apps` con el token | yo |
-| 12 | **Desconectar WhatsApp en ManyChat** (Configuración → WhatsApp → Desconectar). Desde aquí contesta solo Nexolú | Alejandro |
+| 12 | **Desconectar WhatsApp en ManyChat** (Configuración → WhatsApp → Desconectar). Desde aquí contesta solo Nexolú. ⚠️ **NO borrar el número de WhatsApp Manager después**, aunque ManyChat lo sugiera (ver advertencia arriba) | Alejandro |
 | 15 | Registrar el número en nuestra app: `POST /{PHONE_NUMBER_ID}/register` con el PIN. Por si ManyChat lo desregistró al desconectarse | yo |
 | 18 | spa `.env`: `whatsapp_phone_number_id` de Luxury = el real; `WHATSAPP_BOOKING_FLOW_ID` = el de la WABA real → redeploy | yo |
 | 25 | **Validación** (sección C) | los dos |
