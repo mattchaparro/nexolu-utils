@@ -32,6 +32,10 @@ historial de chats de ManyChat. Ninguna herramienta lo transfiere.
 > Pillofón. Solo sirve por si Meta algún día pide verificar el número
 > de nuevo.
 
+> **Qué hay que tener creado ANTES en la WABA productiva** (plantillas,
+> Flow, y en qué archivo entra cada id): [waba-productiva-que-crear.md](waba-productiva-que-crear.md).
+> Casi todo eso se puede hacer con luz, sin desconectar ManyChat.
+
 **Día sugerido:** madrugada de miércoles a jueves o de jueves a viernes.
 Evitar la del viernes: el fin de semana es cuando más se agenda y no
 queremos estrenar ahí.
