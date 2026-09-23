@@ -12,16 +12,28 @@ desconectar ManyChat y suscribir nuestra app.
 
 ---
 
-## 1. Plantillas: **no hay ids que pasarme**
+## 1. Las nueve plantillas: **no hay ids que pasarme**
 
 El código las llama **por nombre e idioma**, no por id. Si las creas con
 estos nombres exactos, no hay nada que actualizar de mi lado.
 
-| Nombre | Categoría | Idioma | Variables | Botones | Quién la manda |
-|---|---|---|---|---|---|
-| `confirmacion_cita` | utility | `es` | 6 | 3 | El panel, al confirmar una cita |
-| `recordatorio_cita` | utility | `es` | 4 | — | El cron, 24h antes |
-| `retoque_recordatorio` | marketing | `es` | 3 | 3 | El cron de retoques |
+| Nombre | Categoría | Variables | Botones | Cuándo sale |
+|---|---|---|---|---|
+| `confirmacion_cita` | utility | 6 | 3 | El panel confirma una cita |
+| `gracias_por_tu_visita` | utility | 6 | 2 | La manicurista terminó |
+| `recordatorio_cita` | utility | 4 | 3 | 24h antes |
+| `retoque_recordatorio` | marketing | 3 | 3 | Cumplidos los días de retoque |
+| `cita_cancelada` | utility | 4 | 1 | El salón cancela |
+| `cupo_disponible` | utility | 5 | 1 | Se liberó un cupo (lista de espera) |
+| `cita_nueva_equipo` | utility | 5 | — | Le agendaron a alguien del equipo |
+| `cita_cancelada_equipo` | utility | 5 | — | Le cancelaron |
+| `cita_movida_equipo` | utility | 5 | — | Le movieron la hora |
+
+Las seis primeras son para la clienta; las tres últimas, para quien atiende.
+
+**Las tres del equipo pueden esperar** si el tiempo aprieta: nacen apagadas y
+se encienden negocio por negocio. Las otras seis, no: cada una tapa un
+mensaje que hoy la clienta simplemente no recibiría.
 
 Los cuerpos exactos, el orden de las variables y los textos de los botones
 están en **`nexolu-spa-api/docs/plantillas-whatsapp.md`**.
@@ -117,11 +129,16 @@ no desactivar la cuenta. El detalle está en el runbook de la madrugada.
 **Ahora, sin tocar nada de ManyChat:**
 
 1. Escribir garantías, recomendaciones y cancelaciones en «Enséñale al bot».
-2. Crear las 3 plantillas en la WABA productiva y esperar la aprobación
-   (suele tardar minutos, pero puede tardar horas: por eso va primero).
+2. Crear las plantillas en la WABA productiva y esperar la aprobación
+   (suele tardar minutos, pero puede tardar horas: por eso va primero). Si
+   el tiempo aprieta, las seis de la clienta primero y las del equipo
+   después: esas nacen apagadas.
 3. Publicar `elegir-fecha.json` en la WABA productiva y anotar el Flow ID.
 4. Poner el Instagram en la página pública y el monto de multa por
    cancelación tardía (hoy las multas se registran en $0).
+5. Si quieres los avisos al equipo desde el día uno: cargarle el WhatsApp a
+   cada manicurista en su ficha y encender el interruptor en Superadmin →
+   el negocio → Configuración de agenda.
 
 **La madrugada del cambio** (todo lo demás, en el runbook): canal en Connect,
 suscribir la app, desconectar ManyChat, registrar el número, `.env` +
@@ -134,7 +151,7 @@ redeploy, validar desde dos teléfonos.
 - [ ] `WABA_ID` de Luxury
 - [ ] `PHONE_NUMBER_ID` del número real
 - [ ] Flow ID de `elegir-fecha` **publicado en esa WABA**
-- [ ] Aviso de que las 3 plantillas quedaron **aprobadas** (o cuál no, y por qué)
+- [ ] Aviso de que las plantillas quedaron **aprobadas** (o cuál no, y por qué)
 
 El **token** y el **PIN** no me los mandes por chat: van directo al panel y
 al `.env`.
